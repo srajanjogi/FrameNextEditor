@@ -1,0 +1,11 @@
+{
+  "name": "video-editor",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "concurrently \"npm run dev --prefix frontend\" \"npm run electron --prefix electron\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0"
+  }
+}

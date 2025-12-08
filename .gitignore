@@ -1,0 +1,18 @@
+# Node modules
+node_modules/
+electron/node_modules/
+
+# Build output
+dist/
+out/
+build/
+
+# Logs
+*.log
+
+# Environment files
+.env
+
+# OS/system files
+.DS_Store
+Thumbs.db
