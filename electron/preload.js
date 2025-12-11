@@ -6,5 +6,7 @@ contextBridge.exposeInMainWorld("api", {
   trimVideo: (start, end) =>
     ipcRenderer.invoke("trim-video", { start, end }),
   exportVideo: (features, mainVideoPath) =>
-    ipcRenderer.invoke("export-video", features, mainVideoPath)
+    ipcRenderer.invoke("export-video", features, mainVideoPath),
+  generatePreview: (features, mainVideoPath) =>
+    ipcRenderer.invoke("generate-preview", features, mainVideoPath)
 });

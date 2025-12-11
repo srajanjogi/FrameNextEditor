@@ -17,7 +17,9 @@ export default function App() {
   const [clip, setClip] = useState({ start: 0, duration: 5 });
   const [drag, setDrag] = useState(null);
   const [isExporting, setIsExporting] = useState(false);
+  const [isGeneratingPreview, setIsGeneratingPreview] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  const [previewVideoSrc, setPreviewVideoSrc] = useState(null);
   const timelineRef = useRef(null);
   const [activeOption, setActiveOption] = useState("trim");
   
@@ -151,6 +153,65 @@ export default function App() {
     setActiveOption(optionId);
   }
 
+  function getFeatures() {
+    return {
+      trim: { start: clip.start, end: clip.start + clip.duration },
+      merge: mergeVideos.length > 0 ? mergeVideos : null,
+      insert: insertVideoSrc ? { 
+        position: insertPosition, 
+        seconds: insertSeconds, 
+        video: insertVideoSrc 
+      } : null,
+      speed: playbackSpeed !== 1.0 ? playbackSpeed : null,
+      audio: audioSrc ? audioSrc : null
+    };
+  }
+
+  async function generatePreview() {
+    if (!videoSrc) {
+      alert("Please select a video first");
+      return;
+    }
+
+    setIsGeneratingPreview(true);
+    try {
+      const features = getFeatures();
+
+      // Check if at least one feature is active
+      const hasFeatures = features.trim || features.merge || features.insert || 
+                         (features.speed && features.speed !== 1.0) || features.audio;
+      
+      if (!hasFeatures) {
+        alert("Please configure at least one editing feature before generating preview.");
+        setIsGeneratingPreview(false);
+        return;
+      }
+
+      // Extract main video path from videoSrc (remove "file://" prefix)
+      let mainVideoPath = videoSrc;
+      if (mainVideoPath && mainVideoPath.startsWith("file://")) {
+        mainVideoPath = mainVideoPath.replace("file://", "");
+      }
+      
+      // Generate preview with all features
+      const previewPath = await window.api.generatePreview(features, mainVideoPath);
+      if (previewPath) {
+        setPreviewVideoSrc("file://" + previewPath);
+        setShowPreview(true);
+      }
+    } catch (error) {
+      console.error("Preview error:", error);
+      alert(`❌ Error generating preview: ${error.message}\n\nPlease check the console for details.`);
+    } finally {
+      setIsGeneratingPreview(false);
+    }
+  }
+
+  function clearPreview() {
+    setPreviewVideoSrc(null);
+    setShowPreview(false);
+  }
+
   async function exportAllFeatures() {
     if (!videoSrc) {
       alert("Please select a video first");
@@ -159,18 +220,7 @@ export default function App() {
 
     setIsExporting(true);
     try {
-      // Collect all features to apply
-      const features = {
-        trim: activeOption === "trim" ? { start: clip.start, end: clip.start + clip.duration } : null,
-        merge: activeOption === "merge" && mergeVideos.length > 0 ? mergeVideos : null,
-        insert: activeOption === "insert" && insertVideoSrc ? { 
-          position: insertPosition, 
-          seconds: insertSeconds, 
-          video: insertVideoSrc 
-        } : null,
-        speed: activeOption === "speed" && playbackSpeed !== 1.0 ? playbackSpeed : null,
-        audio: activeOption === "audio" && audioSrc ? audioSrc : null
-      };
+      const features = getFeatures();
 
       // Check if at least one feature is active
       const hasFeatures = features.trim || features.merge || features.insert || 
@@ -256,14 +306,52 @@ export default function App() {
               <div className="all-features-container">
                 {/* Preview Section */}
                 <div className="preview-section-compact">
-                  <h2>Preview</h2>
-                  <div className="video-wrapper-compact">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                    <h2>Preview</h2>
+                    <div style={{ display: 'flex', gap: '10px' }}>
+                      {previewVideoSrc ? (
+                        <button 
+                          className="feature-btn-small" 
+                          onClick={clearPreview}
+                          style={{ fontSize: '12px', padding: '5px 10px' }}
+                        >
+                          Show Original
+                        </button>
+                      ) : (
+                        <button 
+                          className="feature-btn-small" 
+                          onClick={generatePreview}
+                          disabled={isGeneratingPreview}
+                          style={{ fontSize: '12px', padding: '5px 10px' }}
+                        >
+                          {isGeneratingPreview ? "⏳ Generating..." : "🎬 Generate Preview"}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <div className="video-wrapper-compact" style={{ position: 'relative' }}>
                     <video
-                      src={videoSrc}
+                      src={previewVideoSrc || videoSrc}
                       controls
-                      onLoadedMetadata={onLoadedMetadata}
+                      onLoadedMetadata={previewVideoSrc ? undefined : onLoadedMetadata}
                       className="preview-video-compact"
                     />
+                    {previewVideoSrc && (
+                      <div style={{ 
+                        position: 'absolute', 
+                        top: '10px', 
+                        left: '10px', 
+                        background: 'rgba(0,0,0,0.7)', 
+                        color: 'white', 
+                        padding: '5px 10px', 
+                        borderRadius: '4px',
+                        fontSize: '12px',
+                        zIndex: 10,
+                        pointerEvents: 'none'
+                      }}>
+                        Preview with all effects
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -477,12 +565,28 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Single Export Button */}
-                <div className="actions-unified">
+                {/* Preview and Export Buttons */}
+                <div className="actions-unified" style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
+                  <button
+                    className="feature-btn-small"
+                    onClick={generatePreview}
+                    disabled={isGeneratingPreview || isExporting}
+                    style={{ 
+                      padding: '10px 20px', 
+                      fontSize: '14px',
+                      backgroundColor: previewVideoSrc ? '#4CAF50' : '#2196F3',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '4px',
+                      cursor: (isGeneratingPreview || isExporting) ? 'not-allowed' : 'pointer'
+                    }}
+                  >
+                    {isGeneratingPreview ? "⏳ Generating Preview..." : previewVideoSrc ? "🔄 Regenerate Preview" : "🎬 Generate Preview"}
+                  </button>
                   <button
                     className="export-btn-unified"
                     onClick={exportAllFeatures}
-                    disabled={isExporting}
+                    disabled={isExporting || isGeneratingPreview}
                   >
                     {isExporting ? "⏳ Exporting All Features..." : "💾 Export Video with All Features"}
                   </button>
