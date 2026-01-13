@@ -31,12 +31,19 @@ export default function App() {
   const [insertVideoSrc, setInsertVideoSrc] = useState(null);
   const [insertVideoDuration, setInsertVideoDuration] = useState(0);
   const [insertSeconds, setInsertSeconds] = useState(5);
+  const [insertMode, setInsertMode] = useState("sequential"); // "sequential" or "overlapping"
   
   // Speed control state
   const [playbackSpeed, setPlaybackSpeed] = useState(1.0);
   
   // Audio state
   const [audioSrc, setAudioSrc] = useState(null);
+  const [audioDuration, setAudioDuration] = useState(0);
+  const [audioPlacement, setAudioPlacement] = useState("audio_priority"); // "audio_priority", "video_priority", "custom"
+  const [audioStartTime, setAudioStartTime] = useState(0);
+  const [audioEndTime, setAudioEndTime] = useState(0);
+  const [audioTrimStart, setAudioTrimStart] = useState(0);
+  const [audioTrimEnd, setAudioTrimEnd] = useState(0);
 
   async function pickVideo() {
     const res = await window.api.pickVideo();
@@ -132,6 +139,15 @@ export default function App() {
     }
   }
 
+  function onAudioLoadedMetadata(e) {
+    const dur = e.target.duration;
+    if (dur && dur > 0) {
+      setAudioDuration(dur);
+      setAudioTrimEnd(dur);
+      setAudioEndTime(Math.min(dur, clip.duration || dur));
+    }
+  }
+
   function onInsertVideoMetadata(e) {
     const dur = e.target.duration;
     if (dur && dur > 0) {
@@ -160,11 +176,49 @@ export default function App() {
       insert: insertVideoSrc ? { 
         position: insertPosition, 
         seconds: insertSeconds, 
-        video: insertVideoSrc 
+        video: insertVideoSrc,
+        mode: insertMode
       } : null,
       speed: playbackSpeed !== 1.0 ? playbackSpeed : null,
-      audio: audioSrc ? audioSrc : null
+      audio: audioSrc ? {
+        path: audioSrc,
+        placement: audioPlacement,
+        priority: audioPlacement === "audio_priority" ? "audio" : (audioPlacement === "video_priority" ? "video" : null),
+        startTime: audioPlacement === "custom" ? audioStartTime : 0,
+        endTime: audioPlacement === "custom" ? audioEndTime : (audioPlacement === "audio_priority" ? Math.max(audioDuration, clip.duration) : clip.duration),
+        trimStart: 0, // No trimming - use full audio
+        trimEnd: audioDuration, // Use full audio duration
+        videoDuration: clip.duration,
+        audioDuration: audioDuration
+      } : null
     };
+  }
+
+  function calculateFinalDuration() {
+    if (!videoDuration) return 0;
+    
+    // Start with trimmed base clip duration
+    let finalDuration = clip.duration;
+    
+    // Add merge videos duration (sequential merge)
+    // Note: This is an approximation - actual merge duration depends on backend processing
+    if (mergeVideos.length > 0) {
+      // For now, we'll show base duration + note that merge clips will be added
+      // Actual calculation would require metadata from merge videos
+      finalDuration = clip.duration; // Base trimmed duration
+      // Merge videos will extend this, but we can't calculate without their durations
+    }
+    
+    // For insert: depends on mode (sequential extends, overlapping doesn't)
+    if (insertVideoSrc) {
+      if (insertMode === "sequential") {
+        finalDuration = clip.duration + insertSeconds; // Sequential insert extends duration
+      } else {
+        finalDuration = clip.duration; // Overlapping doesn't extend
+      }
+    }
+    
+    return finalDuration;
   }
 
   async function generatePreview() {
@@ -176,6 +230,14 @@ export default function App() {
     setIsGeneratingPreview(true);
     try {
       const features = getFeatures();
+
+      // Validation: Check overlapping insert doesn't exceed base clip length
+      if (features.insert && features.insert.mode === "overlapping") {
+        const insertEnd = features.insert.position + features.insert.seconds;
+        if (insertEnd > clip.duration) {
+          alert(`⚠️ Warning: Overlapping insert extends beyond Base Clip length.\n\nInsert ends at ${formatTime(insertEnd)} but Base Clip is only ${formatTime(clip.duration)}.\n\nThe insert will be trimmed to fit within the Base Clip.`);
+        }
+      }
 
       // Check if at least one feature is active
       const hasFeatures = features.trim || features.merge || features.insert || 
@@ -222,6 +284,18 @@ export default function App() {
     try {
       const features = getFeatures();
 
+      // Validation: Check overlapping insert doesn't exceed base clip length
+      if (features.insert && features.insert.mode === "overlapping") {
+        const insertEnd = features.insert.position + features.insert.seconds;
+        if (insertEnd > clip.duration) {
+          const proceed = confirm(`⚠️ Warning: Overlapping insert extends beyond Base Clip length.\n\nInsert ends at ${formatTime(insertEnd)} but Base Clip is only ${formatTime(clip.duration)}.\n\nThe insert will be trimmed to fit within the Base Clip.\n\nDo you want to continue?`);
+          if (!proceed) {
+            setIsExporting(false);
+            return;
+          }
+        }
+      }
+
       // Check if at least one feature is active
       const hasFeatures = features.trim || features.merge || features.insert || 
                          (features.speed && features.speed !== 1.0) || features.audio;
@@ -260,6 +334,9 @@ export default function App() {
       <div className="container">
         <div className="sidebar">
           <div className="file-picker" onClick={pickVideo}>
+            <div style={{ marginBottom: '8px', fontSize: '12px', fontWeight: 'bold', color: '#2196F3' }}>
+              📹 Base Clip
+            </div>
             {!videoSrc ? (
               <div className="file-picker-empty">
                 <div className="upload-icon">📁</div>
@@ -364,6 +441,17 @@ export default function App() {
                       <span>End: {formatTime(clip.start + clip.duration)}</span>
                     </div>
                   </div>
+                  <div style={{ 
+                    marginTop: '8px', 
+                    padding: '8px', 
+                    backgroundColor: '#f0f0f0', 
+                    borderRadius: '4px',
+                    fontSize: '13px',
+                    fontWeight: 'bold',
+                    color: '#2196F3'
+                  }}>
+                    📊 Final Video Duration: {formatTime(calculateFinalDuration())}
+                  </div>
                   <div 
                     id="timeline" 
                     ref={timelineRef}
@@ -432,8 +520,11 @@ export default function App() {
                     </div>
                     {activeOption === "merge" && (
                       <div className="feature-content">
+                        <div style={{ marginBottom: '10px', fontSize: '11px', color: '#666', fontWeight: 'bold' }}>
+                          🎬 Insert Clips (will be merged sequentially)
+                        </div>
                         <button className="feature-btn-small" onClick={pickMergeVideo}>
-                          + Add Video
+                          + Add Insert Clip
                         </button>
                         {mergeVideos.length > 0 && (
                           <div className="merge-list-compact">
@@ -458,6 +549,35 @@ export default function App() {
                     </div>
                     {activeOption === "insert" && (
                       <div className="feature-content">
+                        <div style={{ marginBottom: '10px', fontSize: '11px', color: '#666', fontWeight: 'bold' }}>
+                          🎬 Insert Clip
+                        </div>
+                        <div style={{ marginBottom: '10px' }}>
+                          <label style={{ fontSize: '12px', fontWeight: 'bold', marginBottom: '5px', display: 'block' }}>
+                            Insert Mode:
+                          </label>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                            <button
+                              className={`preset-btn-small ${insertMode === "sequential" ? 'active' : ''}`}
+                              onClick={() => setInsertMode("sequential")}
+                              style={{ width: '100%', textAlign: 'left', padding: '5px 10px' }}
+                            >
+                              ➡️ Sequential Insert (extends timeline)
+                            </button>
+                            <button
+                              className={`preset-btn-small ${insertMode === "overlapping" ? 'active' : ''}`}
+                              onClick={() => setInsertMode("overlapping")}
+                              style={{ width: '100%', textAlign: 'left', padding: '5px 10px' }}
+                            >
+                              🔀 Overlapping Insert (overlays base clip)
+                            </button>
+                          </div>
+                          <div style={{ fontSize: '10px', color: '#666', marginTop: '5px', fontStyle: 'italic' }}>
+                            {insertMode === "sequential" 
+                              ? "Insert clip will push base timeline forward. Final duration = Base + Insert"
+                              : "Insert clip will overlay base clip. Final duration = Base Clip duration"}
+                          </div>
+                        </div>
                         <div className="feature-row">
                           <label>Position:</label>
                           <input
@@ -479,18 +599,37 @@ export default function App() {
                             max={insertVideoDuration || 1000}
                             step="0.1"
                             value={insertSeconds}
-                            onChange={(e) => setInsertSeconds(Math.max(0.1, Math.min(parseFloat(e.target.value) || 0.1, insertVideoDuration || 1000)))}
+                            onChange={(e) => {
+                              const newDuration = Math.max(0.1, Math.min(parseFloat(e.target.value) || 0.1, insertVideoDuration || 1000));
+                              setInsertSeconds(newDuration);
+                              // Validate overlapping mode
+                              if (insertMode === "overlapping" && insertPosition + newDuration > clip.duration) {
+                                // Will show warning in validation
+                              }
+                            }}
                             className="feature-input-small"
                           />
                           <span className="feature-unit">s</span>
                         </div>
+                        {insertMode === "overlapping" && insertPosition + insertSeconds > clip.duration && (
+                          <div style={{ 
+                            marginTop: '5px', 
+                            padding: '5px', 
+                            backgroundColor: '#ffebee', 
+                            color: '#c62828', 
+                            borderRadius: '4px',
+                            fontSize: '11px'
+                          }}>
+                            ⚠️ Warning: Insert extends beyond Base Clip length
+                          </div>
+                        )}
                         {!insertVideoSrc ? (
                           <button className="feature-btn-small" onClick={pickInsertVideo}>
-                            + Select Video
+                            + Select Insert Clip
                           </button>
                         ) : (
                           <div className="feature-video-selected">
-                            Video selected
+                            Insert Clip selected
                             <button className="change-btn-small" onClick={pickInsertVideo}>Change</button>
                           </div>
                         )}
@@ -547,18 +686,124 @@ export default function App() {
                             + Select Audio
                           </button>
                         ) : (
-                          <div className="feature-video-selected">
-                            Audio selected
-                            <button 
-                              className="change-btn-small" 
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                pickAudio();
-                              }}
-                            >
-                              Change
-                            </button>
-                          </div>
+                          <>
+                            <div className="feature-video-selected" style={{ marginBottom: '10px' }}>
+                              Audio selected
+                              <button 
+                                className="change-btn-small" 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  pickAudio();
+                                }}
+                              >
+                                Change
+                              </button>
+                            </div>
+                            {audioSrc && (
+                              <audio 
+                                src={audioSrc} 
+                                onLoadedMetadata={onAudioLoadedMetadata}
+                                style={{ display: 'none' }}
+                              />
+                            )}
+                            <div style={{ marginBottom: '10px' }}>
+                              <label style={{ fontSize: '12px', fontWeight: 'bold', marginBottom: '5px', display: 'block' }}>
+                                Audio/Video Priority:
+                              </label>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                                <button
+                                  className={`preset-btn-small ${audioPlacement === "audio_priority" ? 'active' : ''}`}
+                                  onClick={() => {
+                                    setAudioPlacement("audio_priority");
+                                    setAudioStartTime(0);
+                                    // If audio is longer, video will loop; if shorter, audio will repeat
+                                    setAudioEndTime(Math.max(audioDuration, clip.duration));
+                                  }}
+                                  style={{ width: '100%', textAlign: 'left', padding: '5px 10px' }}
+                                >
+                                  🎵 Audio Priority (video loops if audio is longer)
+                                </button>
+                                <button
+                                  className={`preset-btn-small ${audioPlacement === "video_priority" ? 'active' : ''}`}
+                                  onClick={() => {
+                                    setAudioPlacement("video_priority");
+                                    setAudioStartTime(0);
+                                    // If video is longer, audio will repeat; if shorter, audio will be trimmed
+                                    setAudioEndTime(clip.duration);
+                                  }}
+                                  style={{ width: '100%', textAlign: 'left', padding: '5px 10px' }}
+                                >
+                                  🎬 Video Priority (audio repeats/trims to video length)
+                                </button>
+                                <button
+                                  className={`preset-btn-small ${audioPlacement === "custom" ? 'active' : ''}`}
+                                  onClick={() => setAudioPlacement("custom")}
+                                  style={{ width: '100%', textAlign: 'left', padding: '5px 10px' }}
+                                >
+                                  ⚙️ Custom Placement
+                                </button>
+                              </div>
+                              {audioPlacement === "audio_priority" && (
+                                <div style={{ fontSize: '10px', color: '#666', marginTop: '5px', fontStyle: 'italic' }}>
+                                  Video will loop/repeat until audio ends
+                                </div>
+                              )}
+                              {audioPlacement === "video_priority" && (
+                                <div style={{ fontSize: '10px', color: '#666', marginTop: '5px', fontStyle: 'italic' }}>
+                                  Audio will repeat or trim to match video length
+                                </div>
+                              )}
+                            </div>
+                            {audioPlacement === "custom" && (
+                              <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                <div className="feature-row">
+                                  <label>Start Time:</label>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    max={clip.duration}
+                                    step="0.1"
+                                    value={audioStartTime}
+                                    onChange={(e) => {
+                                      const val = Math.max(0, Math.min(parseFloat(e.target.value) || 0, clip.duration));
+                                      setAudioStartTime(val);
+                                      if (val >= audioEndTime) {
+                                        setAudioEndTime(Math.min(val + audioDuration, clip.duration));
+                                      }
+                                    }}
+                                    className="feature-input-small"
+                                  />
+                                  <span className="feature-unit">s</span>
+                                </div>
+                                <div className="feature-row">
+                                  <label>End Time:</label>
+                                  <input
+                                    type="number"
+                                    min={audioStartTime}
+                                    max={clip.duration}
+                                    step="0.1"
+                                    value={audioEndTime}
+                                    onChange={(e) => {
+                                      const val = Math.max(audioStartTime, Math.min(parseFloat(e.target.value) || audioStartTime, clip.duration));
+                                      setAudioEndTime(val);
+                                    }}
+                                    className="feature-input-small"
+                                  />
+                                  <span className="feature-unit">s</span>
+                                </div>
+                              </div>
+                            )}
+                            {audioDuration > 0 && (
+                              <div style={{ marginTop: '15px', padding: '10px', backgroundColor: '#e3f2fd', borderRadius: '4px' }}>
+                                <div style={{ fontSize: '12px', fontWeight: 'bold', marginBottom: '5px', display: 'block', color: '#1976d2' }}>
+                                  🎵 Audio Information:
+                                </div>
+                                <div style={{ fontSize: '13px', color: '#333', fontWeight: '600' }}>
+                                  Total Audio Duration: {formatTime(audioDuration)}
+                                </div>
+                              </div>
+                            )}
+                          </>
                         )}
                       </div>
                     )}

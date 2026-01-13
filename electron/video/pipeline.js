@@ -64,7 +64,8 @@ async function processVideoPipeline(mainVideo, features, outputPath, options = {
         features.insert.position || 0,
         features.insert.seconds || 5,
         trimInfo,
-        tempInsertFile
+        tempInsertFile,
+        features.insert.mode || 'sequential' // Pass the mode: 'sequential' or 'overlapping'
       );
       currentVideo = tempInsertFile;
     }
@@ -73,7 +74,24 @@ async function processVideoPipeline(mainVideo, features, outputPath, options = {
     // This happens BEFORE applying effects so effects can be applied to the entire merged result
     const hasMerge = features.merge && Array.isArray(features.merge) && features.merge.length > 0;
     const hasSpeed = features.speed && features.speed !== 1.0;
-    const hasAudio = features.audio && typeof features.audio === 'string';
+    // Handle both old format (string) and new format (object with path property)
+    const hasAudio = features.audio && (
+      typeof features.audio === 'string' || 
+      (typeof features.audio === 'object' && features.audio.path)
+    );
+    const audioPath = hasAudio ? (
+      typeof features.audio === 'string' ? features.audio : features.audio.path
+    ) : null;
+    const audioOptions = hasAudio && typeof features.audio === 'object' ? {
+      trimStart: features.audio.trimStart,
+      trimEnd: features.audio.trimEnd,
+      placement: features.audio.placement,
+      priority: features.audio.priority,
+      startTime: features.audio.startTime,
+      endTime: features.audio.endTime,
+      videoDuration: features.audio.videoDuration,
+      audioDuration: features.audio.audioDuration
+    } : null;
     const speedValue = hasSpeed ? Number(features.speed) : 1.0;
     
     if (hasMerge) {
@@ -95,10 +113,10 @@ async function processVideoPipeline(mainVideo, features, outputPath, options = {
       console.log("Step 3: Applying speed and audio replacement to entire video (trimmed + merged)...");
       await applySpeedWithAudio(
         currentVideo,
-        features.audio,
+        audioPath,
         speedValue,
         effectsOutputPath,
-        encodingOptions
+        { ...encodingOptions, ...(audioOptions || {}) }
       );
     } else if (hasSpeed) {
       // Only speed
@@ -107,7 +125,7 @@ async function processVideoPipeline(mainVideo, features, outputPath, options = {
     } else if (hasAudio) {
       // Only audio replacement
       console.log("Step 3: Replacing audio in entire video (trimmed + merged)...");
-      await replaceAudio(currentVideo, features.audio, effectsOutputPath, encodingOptions);
+      await replaceAudio(currentVideo, audioPath, effectsOutputPath, { ...encodingOptions, ...(audioOptions || {}) });
     } else {
       // No speed, no audio - just copy
       console.log("Step 3: Copying video (no speed/audio)...");

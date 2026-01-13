@@ -77,3 +77,4 @@ async function applySpeed(videoPath, speedValue, outputPath, options = {}) {
 module.exports = { applySpeed };
 
 
+
