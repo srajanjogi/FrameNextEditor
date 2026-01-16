@@ -6,6 +6,7 @@
     "dev": "concurrently \"npm run dev --prefix frontend\" \"npm run electron --prefix electron\""
   },
   "devDependencies": {
-    "concurrently": "^9.2.1"
+    "concurrently": "^9.2.1",
+    "wait-on": "^9.0.3"
   }
 }

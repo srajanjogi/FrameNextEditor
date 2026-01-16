@@ -44,6 +44,8 @@ export default function App() {
   const [audioEndTime, setAudioEndTime] = useState(0);
   const [audioTrimStart, setAudioTrimStart] = useState(0);
   const [audioTrimEnd, setAudioTrimEnd] = useState(0);
+  const [audioMode, setAudioMode] = useState("replace"); // "replace", "mix_inserted_main", "mix_video_main"
+  const [backgroundAudioVolume, setBackgroundAudioVolume] = useState(0.5); // 0.0 to 1.0 (default 50% for better audibility)
 
   async function pickVideo() {
     const res = await window.api.pickVideo();
@@ -189,7 +191,9 @@ export default function App() {
         trimStart: 0, // No trimming - use full audio
         trimEnd: audioDuration, // Use full audio duration
         videoDuration: clip.duration,
-        audioDuration: audioDuration
+        audioDuration: audioDuration,
+        mode: audioMode, // "replace", "mix_inserted_main", "mix_video_main"
+        backgroundAudioVolume: backgroundAudioVolume // 0.0 to 1.0
       } : null
     };
   }
@@ -334,7 +338,7 @@ export default function App() {
       <div className="container">
         <div className="sidebar">
           <div className="file-picker" onClick={pickVideo}>
-            <div style={{ marginBottom: '8px', fontSize: '12px', fontWeight: 'bold', color: '#2196F3' }}>
+            <div style={{ marginBottom: '8px', fontSize: '12px', fontWeight: 'bold', color: '#818cf8' }}>
               📹 Base Clip
             </div>
             {!videoSrc ? (
@@ -443,12 +447,13 @@ export default function App() {
                   </div>
                   <div style={{ 
                     marginTop: '8px', 
-                    padding: '8px', 
-                    backgroundColor: '#f0f0f0', 
-                    borderRadius: '4px',
+                    padding: '10px', 
+                    backgroundColor: '#0f172a', 
+                    borderRadius: '6px',
                     fontSize: '13px',
-                    fontWeight: 'bold',
-                    color: '#2196F3'
+                    border: '1px solid #334155',
+                    color: '#818cf8',
+                    fontWeight: 'bold'
                   }}>
                     📊 Final Video Duration: {formatTime(calculateFinalDuration())}
                   </div>
@@ -506,7 +511,53 @@ export default function App() {
                     </div>
                     {activeOption === "trim" && (
                       <div className="feature-content">
-                        <div className="feature-info">Selected: {formatTime(clip.start)} - {formatTime(clip.start + clip.duration)}</div>
+                        <div className="feature-info" style={{ marginBottom: '15px' }}>
+                          Selected: {formatTime(clip.start)} - {formatTime(clip.start + clip.duration)}
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                          <div className="feature-row">
+                            <label>Start Time:</label>
+                            <input
+                              type="number"
+                              min="0"
+                              max={videoDuration}
+                              step="0.1"
+                              value={clip.start}
+                              onChange={(e) => {
+                                const newStart = Math.max(0, Math.min(parseFloat(e.target.value) || 0, videoDuration));
+                                const maxDuration = videoDuration - newStart;
+                                setClip(prev => ({
+                                  start: newStart,
+                                  duration: Math.min(prev.duration, maxDuration)
+                                }));
+                              }}
+                              className="feature-input-small"
+                            />
+                            <span className="feature-unit">s</span>
+                          </div>
+                          <div className="feature-row">
+                            <label>End Time:</label>
+                            <input
+                              type="number"
+                              min={clip.start + 0.1}
+                              max={videoDuration}
+                              step="0.1"
+                              value={clip.start + clip.duration}
+                              onChange={(e) => {
+                                const newEnd = Math.max(clip.start + 0.1, Math.min(parseFloat(e.target.value) || clip.start + 0.1, videoDuration));
+                                setClip(prev => ({
+                                  ...prev,
+                                  duration: newEnd - prev.start
+                                }));
+                              }}
+                              className="feature-input-small"
+                            />
+                            <span className="feature-unit">s</span>
+                          </div>
+                          <div className="feature-info" style={{ fontSize: '11px', color: '#94a3b8', marginTop: '5px' }}>
+                            Duration: {formatTime(clip.duration)}
+                          </div>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -520,7 +571,7 @@ export default function App() {
                     </div>
                     {activeOption === "merge" && (
                       <div className="feature-content">
-                        <div style={{ marginBottom: '10px', fontSize: '11px', color: '#666', fontWeight: 'bold' }}>
+                        <div style={{ marginBottom: '10px', fontSize: '11px', color: '#94a3b8', fontWeight: 'bold' }}>
                           🎬 Insert Clips (will be merged sequentially)
                         </div>
                         <button className="feature-btn-small" onClick={pickMergeVideo}>
@@ -549,11 +600,11 @@ export default function App() {
                     </div>
                     {activeOption === "insert" && (
                       <div className="feature-content">
-                        <div style={{ marginBottom: '10px', fontSize: '11px', color: '#666', fontWeight: 'bold' }}>
+                        <div style={{ marginBottom: '10px', fontSize: '11px', color: '#94a3b8', fontWeight: 'bold' }}>
                           🎬 Insert Clip
                         </div>
                         <div style={{ marginBottom: '10px' }}>
-                          <label style={{ fontSize: '12px', fontWeight: 'bold', marginBottom: '5px', display: 'block' }}>
+                          <label style={{ fontSize: '12px', fontWeight: 'bold', marginBottom: '5px', display: 'block', color: '#e2e8f0' }}>
                             Insert Mode:
                           </label>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
@@ -572,7 +623,7 @@ export default function App() {
                               🔀 Overlapping Insert (overlays base clip)
                             </button>
                           </div>
-                          <div style={{ fontSize: '10px', color: '#666', marginTop: '5px', fontStyle: 'italic' }}>
+                          <div style={{ fontSize: '10px', color: '#64748b', marginTop: '5px', fontStyle: 'italic' }}>
                             {insertMode === "sequential" 
                               ? "Insert clip will push base timeline forward. Final duration = Base + Insert"
                               : "Insert clip will overlay base clip. Final duration = Base Clip duration"}
@@ -614,11 +665,13 @@ export default function App() {
                         {insertMode === "overlapping" && insertPosition + insertSeconds > clip.duration && (
                           <div style={{ 
                             marginTop: '5px', 
-                            padding: '5px', 
-                            backgroundColor: '#ffebee', 
-                            color: '#c62828', 
-                            borderRadius: '4px',
-                            fontSize: '11px'
+                            padding: '8px', 
+                            backgroundColor: '#7f1d1d', 
+                            color: '#fca5a5', 
+                            borderRadius: '6px',
+                            fontSize: '11px',
+                            fontWeight: 'bold',
+                            border: '1px solid #991b1b'
                           }}>
                             ⚠️ Warning: Insert extends beyond Base Clip length
                           </div>
@@ -707,7 +760,60 @@ export default function App() {
                               />
                             )}
                             <div style={{ marginBottom: '10px' }}>
-                              <label style={{ fontSize: '12px', fontWeight: 'bold', marginBottom: '5px', display: 'block' }}>
+                              <label style={{ fontSize: '12px', fontWeight: 'bold', marginBottom: '5px', display: 'block', color: '#e2e8f0' }}>
+                                Audio Mode:
+                              </label>
+                              <select
+                                value={audioMode}
+                                onChange={(e) => setAudioMode(e.target.value)}
+                                style={{
+                                  width: '100%',
+                                  padding: '8px 10px',
+                                  fontSize: '13px',
+                                  backgroundColor: '#1e293b',
+                                  color: '#e2e8f0',
+                                  border: '1px solid #334155',
+                                  borderRadius: '6px',
+                                  outline: 'none',
+                                  cursor: 'pointer',
+                                  fontFamily: 'inherit'
+                                }}
+                                onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
+                                onBlur={(e) => e.target.style.borderColor = '#334155'}
+                              >
+                                <option value="replace">🔄 Replace Audio (removes original video audio)</option>
+                                <option value="mix_inserted_main">🎵 Mix: Inserted Audio as Main (video audio as background)</option>
+                                <option value="mix_video_main">🎬 Mix: Video Audio as Main (inserted audio as background)</option>
+                              </select>
+                              <div style={{ fontSize: '10px', color: '#64748b', marginTop: '5px', fontStyle: 'italic' }}>
+                                {audioMode === "replace" 
+                                  ? "Original video audio will be completely replaced"
+                                  : audioMode === "mix_inserted_main"
+                                  ? "Inserted audio will be louder, video audio will be quieter in background"
+                                  : "Video audio will be louder, inserted audio will be quieter in background"}
+                              </div>
+                            </div>
+                            {(audioMode === "mix_inserted_main" || audioMode === "mix_video_main") && (
+                              <div style={{ marginBottom: '10px' }}>
+                                <label style={{ fontSize: '12px', fontWeight: 'bold', marginBottom: '5px', display: 'block', color: '#e2e8f0' }}>
+                                  Background Audio Volume: {Math.round(backgroundAudioVolume * 100)}%
+                                </label>
+                                <input
+                                  type="range"
+                                  min="0"
+                                  max="100"
+                                  step="5"
+                                  value={backgroundAudioVolume * 100}
+                                  onChange={(e) => setBackgroundAudioVolume(parseFloat(e.target.value) / 100)}
+                                  style={{ width: '100%' }}
+                                />
+                                <div style={{ fontSize: '10px', color: '#64748b', marginTop: '3px', fontStyle: 'italic' }}>
+                                  Adjust how loud the background audio should be (0% = silent, 100% = same as main)
+                                </div>
+                              </div>
+                            )}
+                            <div style={{ marginBottom: '10px' }}>
+                              <label style={{ fontSize: '12px', fontWeight: 'bold', marginBottom: '5px', display: 'block', color: '#e2e8f0' }}>
                                 Audio/Video Priority:
                               </label>
                               <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
@@ -744,12 +850,12 @@ export default function App() {
                                 </button>
                               </div>
                               {audioPlacement === "audio_priority" && (
-                                <div style={{ fontSize: '10px', color: '#666', marginTop: '5px', fontStyle: 'italic' }}>
+                                <div style={{ fontSize: '10px', color: '#64748b', marginTop: '5px', fontStyle: 'italic' }}>
                                   Video will loop/repeat until audio ends
                                 </div>
                               )}
                               {audioPlacement === "video_priority" && (
-                                <div style={{ fontSize: '10px', color: '#666', marginTop: '5px', fontStyle: 'italic' }}>
+                                <div style={{ fontSize: '10px', color: '#64748b', marginTop: '5px', fontStyle: 'italic' }}>
                                   Audio will repeat or trim to match video length
                                 </div>
                               )}
@@ -794,11 +900,11 @@ export default function App() {
                               </div>
                             )}
                             {audioDuration > 0 && (
-                              <div style={{ marginTop: '15px', padding: '10px', backgroundColor: '#e3f2fd', borderRadius: '4px' }}>
-                                <div style={{ fontSize: '12px', fontWeight: 'bold', marginBottom: '5px', display: 'block', color: '#1976d2' }}>
+                              <div style={{ marginTop: '15px', padding: '12px', backgroundColor: '#0f172a', borderRadius: '8px', border: '1px solid #334155' }}>
+                                <div style={{ fontSize: '12px', fontWeight: 'bold', marginBottom: '8px', display: 'block', color: '#818cf8' }}>
                                   🎵 Audio Information:
                                 </div>
-                                <div style={{ fontSize: '13px', color: '#333', fontWeight: '600' }}>
+                                <div style={{ fontSize: '13px', color: '#cbd5e1', fontWeight: '600' }}>
                                   Total Audio Duration: {formatTime(audioDuration)}
                                 </div>
                               </div>
@@ -819,11 +925,13 @@ export default function App() {
                     style={{ 
                       padding: '10px 20px', 
                       fontSize: '14px',
-                      backgroundColor: previewVideoSrc ? '#4CAF50' : '#2196F3',
+                      background: previewVideoSrc ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' : 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
                       color: 'white',
                       border: 'none',
-                      borderRadius: '4px',
-                      cursor: (isGeneratingPreview || isExporting) ? 'not-allowed' : 'pointer'
+                      borderRadius: '8px',
+                      cursor: (isGeneratingPreview || isExporting) ? 'not-allowed' : 'pointer',
+                      fontWeight: '600',
+                      boxShadow: previewVideoSrc ? '0 4px 12px rgba(16, 185, 129, 0.4)' : '0 4px 12px rgba(99, 102, 241, 0.4)'
                     }}
                   >
                     {isGeneratingPreview ? "⏳ Generating Preview..." : previewVideoSrc ? "🔄 Regenerate Preview" : "🎬 Generate Preview"}

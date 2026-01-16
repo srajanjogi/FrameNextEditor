@@ -3,7 +3,8 @@ const { mergeVideos } = require("./merge");
 const { trimVideo } = require("./trim");
 const { insertVideo } = require("./insert");
 const { applySpeed } = require("./speed");
-const { replaceAudio, applySpeedWithAudio } = require("./audio");
+const { replaceAudio, applySpeedWithAudio, mixAudio, applySpeedWithMixedAudio } = require("./audio");
+const { getVideoMetadata, hasAudioStream } = require("../utils/videoUtils");
 const { normalizePath } = require("../utils/pathUtils");
 const { cleanupTempFiles } = require("../utils/fileUtils");
 
@@ -90,7 +91,9 @@ async function processVideoPipeline(mainVideo, features, outputPath, options = {
       startTime: features.audio.startTime,
       endTime: features.audio.endTime,
       videoDuration: features.audio.videoDuration,
-      audioDuration: features.audio.audioDuration
+      audioDuration: features.audio.audioDuration,
+      mode: features.audio.mode, // "replace", "mix_inserted_main", "mix_video_main"
+      backgroundAudioVolume: features.audio.backgroundAudioVolume
     } : null;
     const speedValue = hasSpeed ? Number(features.speed) : 1.0;
     
@@ -108,24 +111,80 @@ async function processVideoPipeline(mainVideo, features, outputPath, options = {
     // This ensures effects are applied to both the trimmed base video AND merged videos
     const effectsOutputPath = outputPath;
     
+    // Check if video has audio and if mixing mode is selected
+    let videoHasAudio = false;
+    let useMixing = false;
+    let mainAudioIsVideo = true;
+    let backgroundVolume = 0.5;
+    
+    if (hasAudio && audioOptions) {
+      try {
+        const videoMeta = await getVideoMetadata(currentVideo);
+        videoHasAudio = hasAudioStream(videoMeta);
+        
+        if (videoHasAudio) {
+          const audioMode = audioOptions.mode || "replace";
+          useMixing = audioMode === "mix_inserted_main" || audioMode === "mix_video_main";
+          mainAudioIsVideo = audioMode === "mix_video_main";
+          backgroundVolume = audioOptions.backgroundAudioVolume !== undefined ? audioOptions.backgroundAudioVolume : 0.5;
+          console.log("Audio mode detected:", audioMode, "useMixing:", useMixing, "mainAudioIsVideo:", mainAudioIsVideo, "backgroundVolume:", backgroundVolume);
+        }
+      } catch (e) {
+        console.warn("Could not check if video has audio:", e);
+      }
+    }
+    
     if (hasSpeed && hasAudio) {
       // Both speed and audio
-      console.log("Step 3: Applying speed and audio replacement to entire video (trimmed + merged)...");
-      await applySpeedWithAudio(
-        currentVideo,
-        audioPath,
-        speedValue,
-        effectsOutputPath,
-        { ...encodingOptions, ...(audioOptions || {}) }
-      );
+      if (useMixing) {
+        console.log("Step 3: Applying speed and audio mixing to entire video (trimmed + merged)...");
+        await applySpeedWithMixedAudio(
+          currentVideo,
+          audioPath,
+          speedValue,
+          effectsOutputPath,
+          { 
+            ...encodingOptions, 
+            ...(audioOptions || {}),
+            mainAudioIsVideo: mainAudioIsVideo,
+            mainAudioVolume: 1.0,
+            backgroundAudioVolume: backgroundVolume
+          }
+        );
+      } else {
+        console.log("Step 3: Applying speed and audio replacement to entire video (trimmed + merged)...");
+        await applySpeedWithAudio(
+          currentVideo,
+          audioPath,
+          speedValue,
+          effectsOutputPath,
+          { ...encodingOptions, ...(audioOptions || {}) }
+        );
+      }
     } else if (hasSpeed) {
       // Only speed
       console.log("Step 3: Applying speed to entire video (trimmed + merged)...");
       await applySpeed(currentVideo, speedValue, effectsOutputPath, encodingOptions);
     } else if (hasAudio) {
-      // Only audio replacement
-      console.log("Step 3: Replacing audio in entire video (trimmed + merged)...");
-      await replaceAudio(currentVideo, audioPath, effectsOutputPath, { ...encodingOptions, ...(audioOptions || {}) });
+      // Only audio
+      if (useMixing) {
+        console.log("Step 3: Mixing audio in entire video (trimmed + merged)...");
+        await mixAudio(
+          currentVideo,
+          audioPath,
+          effectsOutputPath,
+          { 
+            ...encodingOptions, 
+            ...(audioOptions || {}),
+            mainAudioIsVideo: mainAudioIsVideo,
+            mainAudioVolume: 1.0,
+            backgroundAudioVolume: backgroundVolume
+          }
+        );
+      } else {
+        console.log("Step 3: Replacing audio in entire video (trimmed + merged)...");
+        await replaceAudio(currentVideo, audioPath, effectsOutputPath, { ...encodingOptions, ...(audioOptions || {}) });
+      }
     } else {
       // No speed, no audio - just copy
       console.log("Step 3: Copying video (no speed/audio)...");

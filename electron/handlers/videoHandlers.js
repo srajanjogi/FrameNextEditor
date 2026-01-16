@@ -134,12 +134,25 @@ async function handleGeneratePreview(_, features, mainVideoPathParam = null) {
     throw new Error(`Main video file not found: ${mainVideo}`);
   }
 
-  // Create temp preview file
-  const tempDir = path.join(require('os').tmpdir(), 'videoeditor_preview');
+  // Create temp preview file using the same path preparation as export
+  const os = require('os');
+  const tempDir = path.join(os.tmpdir(), 'videoeditor_preview');
+  
+  // Ensure directory exists
   if (!fs.existsSync(tempDir)) {
-    fs.mkdirSync(tempDir, { recursive: true });
+    try {
+      fs.mkdirSync(tempDir, { recursive: true });
+    } catch (dirErr) {
+      console.error("Error creating preview directory:", dirErr);
+      throw new Error(`Failed to create preview directory: ${tempDir}`);
+    }
   }
-  const previewFile = path.join(tempDir, `preview_${Date.now()}.mp4`);
+  
+  // Create preview file path - use prepareOutputPath to ensure proper formatting
+  let previewFile = path.join(tempDir, `preview_${Date.now()}.mp4`);
+  previewFile = prepareOutputPath(previewFile);
+  
+  console.log("Preview file path:", previewFile);
 
   console.log("generate-preview handler called");
   console.log("Preview features:", JSON.stringify(features, null, 2));
